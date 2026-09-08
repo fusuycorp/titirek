@@ -47,6 +47,26 @@ describe("Error Management & Diagnostics System", () => {
     expect(recent[0].traceId).toBe(entry.traceId);
   });
 
+  it("survives circular caller context without masking the original error", () => {
+    const circular: Record<string, unknown> = { action: "test:circular" };
+    circular.self = circular;
+    let entry: ReturnType<typeof logDiagnostic> | undefined;
+    expect(() => {
+      entry = logDiagnostic(
+        new Error("original"),
+        circular as { action: string },
+      );
+    }).not.toThrow();
+    expect(entry?.userMessage).toBe("original");
+    expect(entry?.action).toBe("test:circular");
+    // Stored entry stays wire-safe for the admin diagnostics action.
+    expect(entry?.technicalDetails).toMatchObject({
+      action: "test:circular",
+      _unserializable: "technicalDetails omitted",
+    });
+    expect(() => JSON.stringify(getRecentDiagnostics())).not.toThrow();
+  });
+
   describe("extractErrorMessage (shared, C3)", () => {
     it("joins PocketBase field-level validation messages", () => {
       const err = {

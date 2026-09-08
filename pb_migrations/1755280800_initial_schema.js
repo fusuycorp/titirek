@@ -1,8 +1,8 @@
 /// <reference path="../pb_data/types.d.ts" />
 
 // Initial hepyeni schema: extends the built-in `users` auth collection with
-// admin/ban/avatar fields and disables password auth (Google OAuth2 + email
-// OTP only), then creates the 5 product collections (groups, group_members,
+// admin/ban/avatar fields and enables password auth alongside Google OAuth2
+// and email OTP, then creates the 5 product collections (groups, group_members,
 // titles, votes, reviews) — the PocketBase equivalent of
 // src/db/schema.ts's 9 Postgres tables (the other 4 — user/account/session/
 // verificationToken — dissolve into PocketBase's built-in auth machinery).
