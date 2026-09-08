@@ -112,7 +112,7 @@ export default async function ActivityPage() {
         }),
     ]);
 
-    items = [
+    const unsorted: ActivityItem[] = [
       ...titles.items.map((title): ActivityItem => ({
         kind: "proposed",
         at: title.createdAt,
@@ -128,7 +128,16 @@ export default async function ActivityPage() {
         at: comment.createdAt,
         comment,
       })),
-    ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+    ];
+    // Precompute timestamps once — parsing inside the comparator repeats
+    // Date construction O(n log n) times per render.
+    items = unsorted
+      .map((item) => {
+        const atTime = Date.parse(item.at);
+        return { item, atTime: Number.isNaN(atTime) ? 0 : atTime };
+      })
+      .sort((a, b) => b.atTime - a.atTime)
+      .map(({ item }) => item);
   }
 
   const currentUser = {

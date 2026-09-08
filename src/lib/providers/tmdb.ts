@@ -1,4 +1,5 @@
 import { logDiagnostic } from "@/lib/errors";
+import { cachedSearch, normalizeSearchKey } from "./search-cache";
 import type { MediaProvider, NormalizedSearchResult } from "./types";
 
 type TmdbResult = {
@@ -70,6 +71,53 @@ async function searchItunesVideo(
   }));
 }
 
+async function searchTmdbUncached(
+  endpoint: "movie" | "tv",
+  mediaType: "movie" | "tv",
+  cleanQuery: string,
+): Promise<NormalizedSearchResult[]> {
+  const apiKey = process.env.TMDB_API_KEY;
+  if (apiKey) {
+    try {
+      const url = new URL(`https://api.themoviedb.org/3/search/${endpoint}`);
+      url.searchParams.set("query", cleanQuery);
+      url.searchParams.set("include_adult", "false");
+
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        cache: "no-store",
+        signal: AbortSignal.timeout(8000),
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as { results?: TmdbResult[] };
+        return (data.results ?? []).map((item) => ({
+          externalId: String(item.id),
+          externalSource: "tmdb",
+          title: item.title ?? item.name ?? "Untitled",
+          creator: undefined,
+          coverUrl: item.poster_path
+            ? `https://image.tmdb.org/t/p/w342${item.poster_path}`
+            : undefined,
+          metadata: {
+            overview: item.overview,
+            releaseDate: item.release_date ?? item.first_air_date,
+          },
+        }));
+      }
+    } catch (err) {
+      logDiagnostic(err, {
+        action: `tmdb:${endpoint}:search`,
+        queryLength: cleanQuery.length,
+        note: `Falling back to iTunes ${mediaType} search`,
+      });
+    }
+  }
+
+  // Zero-config public fallback via iTunes
+  return searchItunesVideo(cleanQuery, mediaType);
+}
+
 function makeTmdbProvider(
   endpoint: "movie" | "tv",
   mediaType: "movie" | "tv",
@@ -79,47 +127,9 @@ function makeTmdbProvider(
     async search(query): Promise<NormalizedSearchResult[]> {
       const cleanQuery = query.trim();
       if (!cleanQuery) return [];
-
-      const apiKey = process.env.TMDB_API_KEY;
-      if (apiKey) {
-        try {
-          const url = new URL(`https://api.themoviedb.org/3/search/${endpoint}`);
-          url.searchParams.set("query", cleanQuery);
-          url.searchParams.set("include_adult", "false");
-
-          const res = await fetch(url, {
-            headers: { Authorization: `Bearer ${apiKey}` },
-            cache: "no-store",
-            signal: AbortSignal.timeout(8000),
-          });
-
-          if (res.ok) {
-            const data = (await res.json()) as { results?: TmdbResult[] };
-            return (data.results ?? []).map((item) => ({
-              externalId: String(item.id),
-              externalSource: "tmdb",
-              title: item.title ?? item.name ?? "Untitled",
-              creator: undefined,
-              coverUrl: item.poster_path
-                ? `https://image.tmdb.org/t/p/w342${item.poster_path}`
-                : undefined,
-              metadata: {
-                overview: item.overview,
-                releaseDate: item.release_date ?? item.first_air_date,
-              },
-            }));
-          }
-        } catch (err) {
-          logDiagnostic(err, {
-            action: `tmdb:${endpoint}:search`,
-            queryLength: cleanQuery.length,
-            note: `Falling back to iTunes ${mediaType} search`,
-          });
-        }
-      }
-
-      // Zero-config public fallback via iTunes
-      return searchItunesVideo(cleanQuery, mediaType);
+      return cachedSearch(normalizeSearchKey(mediaType, cleanQuery), () =>
+        searchTmdbUncached(endpoint, mediaType, cleanQuery),
+      );
     },
   };
 }

@@ -1,4 +1,5 @@
 import { logDiagnostic } from "@/lib/errors";
+import { cachedSearch, normalizeSearchKey } from "./search-cache";
 import type { MediaProvider, NormalizedSearchResult } from "./types";
 
 type SpotifyAlbum = {
@@ -92,54 +93,61 @@ async function searchItunesMusic(query: string): Promise<NormalizedSearchResult[
   }));
 }
 
+async function searchSpotifyUncached(
+  cleanQuery: string,
+): Promise<NormalizedSearchResult[]> {
+  const clientId = process.env.SPOTIFY_CLIENT_ID;
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+
+  if (clientId && clientSecret) {
+    try {
+      const token = await getAccessToken();
+      const url = new URL("https://api.spotify.com/v1/search");
+      url.searchParams.set("q", cleanQuery);
+      url.searchParams.set("type", "album");
+      url.searchParams.set("limit", "12");
+
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+        signal: AbortSignal.timeout(8000),
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as {
+          albums?: { items: SpotifyAlbum[] };
+        };
+        const results = (data.albums?.items ?? []).map((album) => ({
+          externalId: album.id,
+          externalSource: "spotify",
+          title: album.name,
+          creator: album.artists?.map((a) => a.name).join(", "),
+          coverUrl: album.images?.[0]?.url,
+          metadata: { releaseDate: album.release_date },
+        }));
+        if (results.length > 0) return results;
+      }
+    } catch (err) {
+      logDiagnostic(err, {
+        action: "spotify:search",
+        queryLength: cleanQuery.length,
+        note: "Falling back to iTunes music search",
+      });
+    }
+  }
+
+  // Public zero-config fallback via iTunes Music Search
+  return searchItunesMusic(cleanQuery);
+}
+
 export const spotifyProvider: MediaProvider = {
   mediaType: "music",
   async search(query): Promise<NormalizedSearchResult[]> {
     const cleanQuery = query.trim();
     if (!cleanQuery) return [];
-
-    const clientId = process.env.SPOTIFY_CLIENT_ID;
-    const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
-
-    if (clientId && clientSecret) {
-      try {
-        const token = await getAccessToken();
-        const url = new URL("https://api.spotify.com/v1/search");
-        url.searchParams.set("q", cleanQuery);
-        url.searchParams.set("type", "album");
-        url.searchParams.set("limit", "12");
-
-        const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: "no-store",
-          signal: AbortSignal.timeout(8000),
-        });
-
-        if (res.ok) {
-          const data = (await res.json()) as {
-            albums?: { items: SpotifyAlbum[] };
-          };
-          const results = (data.albums?.items ?? []).map((album) => ({
-            externalId: album.id,
-            externalSource: "spotify",
-            title: album.name,
-            creator: album.artists?.map((a) => a.name).join(", "),
-            coverUrl: album.images?.[0]?.url,
-            metadata: { releaseDate: album.release_date },
-          }));
-          if (results.length > 0) return results;
-        }
-      } catch (err) {
-        logDiagnostic(err, {
-          action: "spotify:search",
-          queryLength: cleanQuery.length,
-          note: "Falling back to iTunes music search",
-        });
-      }
-    }
-
-    // Public zero-config fallback via iTunes Music Search
-    return searchItunesMusic(cleanQuery);
+    return cachedSearch(normalizeSearchKey("music", cleanQuery), () =>
+      searchSpotifyUncached(cleanQuery),
+    );
   },
 };
 
