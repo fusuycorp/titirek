@@ -9,7 +9,8 @@ on:
 jobs:
   test:
     name: test
-    runs-on: ubuntu-latest
+    # OCocuk dedicated builder (see selfhosted/docs/selfhosted-build.md).
+    runs-on: [self-hosted, builder]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
@@ -28,15 +29,18 @@ jobs:
       # next build generates .next/types, which a standalone `tsc --noEmit`
       # needs to resolve route-level types (e.g. LayoutProps); otherwise the
       # typecheck reports a phantom error on fresh checkouts.
+      # Bun 1.3.14 segfaults on exit after a successful build (same quirk
+      # the Dockerfile works around) — gate on the artifact, not the exit.
       - name: Production Build
-        run: bun next build
+        run: bun --bun next build; test -f .next/standalone/server.js
 
       - name: Typecheck
         run: bun x tsc --noEmit
 
   lint:
     name: lint
-    runs-on: ubuntu-latest
+    # OCocuk dedicated builder (see selfhosted/docs/selfhosted-build.md).
+    runs-on: [self-hosted, builder]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5

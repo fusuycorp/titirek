@@ -12,7 +12,8 @@ on:
 jobs:
   changes:
     name: Detect Changed Paths
-    runs-on: ubuntu-latest
+    # OCocuk dedicated builder (see selfhosted/docs/selfhosted-build.md).
+    runs-on: [self-hosted, builder]
     outputs:
       pocketbase: ${{ steps.filter.outputs.pocketbase }}
     steps:
@@ -39,7 +40,8 @@ jobs:
 
   build-app:
     name: Build & Push App Image
-    runs-on: ubuntu-latest
+    # OCocuk dedicated builder (see selfhosted/docs/selfhosted-build.md).
+    runs-on: [self-hosted, builder]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
@@ -72,18 +74,17 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          # Cloudflare (fronting registry.bogazici.app) enforces a 100MB
-          # request-body limit; without forced max-compression a Next.js
-          # standalone image layer can exceed that on push.
-          outputs: type=image,push=true,compression=gzip,compression-level=9,force-compression=true
+          # No type=gha cache: OCocuk's local BuildKit layer cache persists
+          # on NVMe across runs. No forced gzip compression either: pushes
+          # route over the Hetzner LAN (10.34.0.4) via /etc/hosts, bypassing
+          # Cloudflare's 100MB request-body limit entirely.
 
   build-pocketbase:
     name: Build & Push PocketBase Image
     needs: changes
     if: needs.changes.outputs.pocketbase == 'true'
-    runs-on: ubuntu-latest
+    # OCocuk dedicated builder (see selfhosted/docs/selfhosted-build.md).
+    runs-on: [self-hosted, builder]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
@@ -116,9 +117,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          outputs: type=image,push=true,compression=gzip,compression-level=9,force-compression=true
+          # Same as build-app: local BuildKit cache, LAN push, no Cloudflare
+          # ceiling — so no gha cache and no forced compression.
 
   deploy:
     name: Trigger Dokploy Redeployment
@@ -132,7 +132,8 @@ jobs:
       always() &&
       needs.build-app.result == 'success' &&
       (needs.build-pocketbase.result == 'success' || needs.build-pocketbase.result == 'skipped')
-    runs-on: ubuntu-latest
+    # OCocuk dedicated builder (see selfhosted/docs/selfhosted-build.md).
+    runs-on: [self-hosted, builder]
     steps:
       - name: Trigger Dokploy Stack Redeployment
         env:
