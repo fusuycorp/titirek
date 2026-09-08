@@ -82,6 +82,32 @@ describe("search-cache", () => {
     }
   });
 
+  it("ignores stale completions after clear-during-flight", async () => {
+    clearSearchCache();
+    try {
+      let releaseStale!: () => void;
+      const gate = new Promise<void>((r) => {
+        releaseStale = r;
+      });
+      const stale = cachedSearch("k-clear", async () => {
+        await gate;
+        return "stale";
+      });
+      clearSearchCache();
+      expect(await cachedSearch("k-clear", async () => "fresh")).toBe(
+        "fresh",
+      );
+      releaseStale();
+      // Stale caller still resolves, but must not clobber the fresh entry.
+      await expect(stale).resolves.toBe("stale");
+      expect(await cachedSearch("k-clear", async () => "third")).toBe(
+        "fresh",
+      );
+    } finally {
+      clearSearchCache();
+    }
+  });
+
   it("routes repeated podcast searches through the cache (wiring)", async () => {
     clearSearchCache();
     const original = globalThis.fetch;

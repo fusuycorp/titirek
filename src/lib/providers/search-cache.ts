@@ -51,13 +51,17 @@ export async function cachedSearch<T>(
 
   const run = fetcher().then(
     (value) => {
-      if (!store.has(key) && store.size >= MAX_ENTRIES) evictOldest();
-      store.set(key, { expiresAt: Date.now() + ttlMs, value });
-      pending.delete(key);
+      // A clearSearchCache() during flight must not let this stale
+      // completion clobber replacement state (newer pending or value).
+      if (pending.get(key) === run) {
+        if (!store.has(key) && store.size >= MAX_ENTRIES) evictOldest();
+        store.set(key, { expiresAt: Date.now() + ttlMs, value });
+        pending.delete(key);
+      }
       return value;
     },
     (err) => {
-      pending.delete(key);
+      if (pending.get(key) === run) pending.delete(key);
       throw err;
     },
   );
