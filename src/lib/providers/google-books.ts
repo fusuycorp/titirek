@@ -1,4 +1,5 @@
 import { logDiagnostic } from "@/lib/errors";
+import { cachedSearch, normalizeSearchKey } from "./search-cache";
 import type { MediaProvider, NormalizedSearchResult } from "./types";
 
 type GoogleBooksItem = {
@@ -107,12 +108,9 @@ async function searchOpenLibrary(
   }));
 }
 
-export const googleBooksProvider: MediaProvider = {
-  mediaType: "book",
-  async search(query): Promise<NormalizedSearchResult[]> {
-    const cleanQuery = query.trim();
-    if (!cleanQuery) return [];
-
+async function searchGoogleBooksUncached(
+  cleanQuery: string,
+): Promise<NormalizedSearchResult[]> {
     const apiKey =
       process.env.GOOGLE_BOOKS_API_KEY || process.env.GOOGLE_API_KEY;
 
@@ -181,5 +179,15 @@ export const googleBooksProvider: MediaProvider = {
       });
       return [];
     }
+}
+
+export const googleBooksProvider: MediaProvider = {
+  mediaType: "book",
+  async search(query): Promise<NormalizedSearchResult[]> {
+    const cleanQuery = query.trim();
+    if (!cleanQuery) return [];
+    return cachedSearch(normalizeSearchKey("book", cleanQuery), () =>
+      searchGoogleBooksUncached(cleanQuery),
+    );
   },
 };

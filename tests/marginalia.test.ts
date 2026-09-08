@@ -344,6 +344,9 @@ const db = {
   userIsAdmin: false,
   failNextWrite: null as Error | null,
   failNextRead: null as Error | null,
+  // Monotonic fake-ID counter: size-based IDs collide after deletions and
+  // would mask duplicate-key/upsert bugs under test.
+  nextQuoteId: 1,
 };
 
 // Tracks getSession invocations across the fresh spy installed per test, so a
@@ -357,6 +360,7 @@ function resetDb() {
   db.userIsAdmin = false;
   db.failNextWrite = null;
   db.failNextRead = null;
+  db.nextQuoteId = 1;
   getSessionCalls = 0;
 }
 
@@ -396,7 +400,7 @@ function makePbClient() {
           },
           create: async (payload: Record<string, unknown>) => {
             if (db.failNextWrite) throw db.failNextWrite;
-            const id = `quote-${db.quotes.size + 1}`;
+            const id = `quote-${db.nextQuoteId++}`;
             db.quotes.set(id, {
               user: payload.user as string,
               titleName: payload.titleName as string,

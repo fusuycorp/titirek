@@ -35,10 +35,13 @@ export function extractErrorMessage(
 }
 
 export function generateTraceId(): string {
+  // 32-symbol alphabet (no 0/1/O confusion); indices from crypto randomness.
+  // 2^32 % 32 === 0 so the modulo introduces no bias.
   const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const rand = crypto.getRandomValues(new Uint32Array(6));
   let id = "ERR-";
   for (let i = 0; i < 6; i++) {
-    id += chars.charAt(Math.floor(Math.random() * chars.length));
+    id += chars.charAt(rand[i] % chars.length);
   }
   return id;
 }
@@ -77,7 +80,25 @@ export function logDiagnostic(
   const code = isApp ? error.code : "INTERNAL_ERROR";
   const message = error instanceof Error ? error.message : String(error);
   const stack = error instanceof Error ? error.stack : undefined;
-  const technicalDetails = isApp ? error.technicalDetails : { rawError: message };
+  const rawDetails = isApp ? error.technicalDetails : { rawError: message };
+
+  // Buffered entries cross a serialization boundary (admin diagnostics
+  // server action), so never store unserializable details — and never let
+  // console logging throw and mask the original error.
+  let mergedDetails: Record<string, unknown> = {
+    ...context,
+    ...rawDetails,
+  };
+  let detailsJson: string;
+  try {
+    detailsJson = JSON.stringify(mergedDetails);
+  } catch {
+    mergedDetails = { _unserializable: "technicalDetails omitted" };
+    if (typeof context.action === "string") {
+      mergedDetails.action = context.action;
+    }
+    detailsJson = JSON.stringify(mergedDetails);
+  }
 
   const entry: DiagnosticEntry = {
     traceId,
@@ -85,10 +106,7 @@ export function logDiagnostic(
     code,
     action: context.action,
     userMessage: message,
-    technicalDetails: {
-      ...context,
-      ...technicalDetails,
-    },
+    technicalDetails: mergedDetails,
     stack,
   };
 
@@ -101,7 +119,7 @@ export function logDiagnostic(
   // Structured logging to console
   console.error(
     `[HEPYENI_DIAGNOSTIC] ${entry.traceId} [${entry.code}] (${entry.action}): ${entry.userMessage}`,
-    JSON.stringify(entry.technicalDetails),
+    detailsJson,
   );
 
   return entry;
